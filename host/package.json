@@ -1,0 +1,18 @@
+{
+  "name": "graffiti-guard-host",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@graffiti-garden/implementation-decentralized": "^0.0.9",
+    "@graffiti-garden/wrapper-vue": "^1.2.2",
+    "vue": "^3.5.29"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.4",
+    "@vue/typescript-plugin": "^3.2.5",
+    "vite": "^8.0.12"
+  }
+}

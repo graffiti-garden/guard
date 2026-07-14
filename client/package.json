@@ -1,0 +1,53 @@
+{
+  "name": "@graffiti-garden/guard",
+  "version": "0.0.1",
+  "description": "Capability-based access to Graffiti operations",
+  "types": "./dist/index.d.ts",
+  "module": "./dist/esm/index.js",
+  "main": "./dist/cjs/index.js",
+  "browser": "./dist/browser/index.js",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist",
+    "LICENSE",
+    "package.json",
+    "README.md"
+  ],
+  "author": "Theia Henderson",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "build:types": "tsc --declaration --emitDeclarationOnly",
+    "build:js": "tsx esbuild.config.mts",
+    "build": "rm -rf dist && rm -rf docs && npm run build:types && npm run build:js && npm run build:docs",
+    "build:docs": "typedoc --options typedoc.json",
+    "prepublishOnly": "npm update && npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/graffiti-garden/guard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/graffiti-garden/guard/issues"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "tsx": "^4.21.0",
+    "typedoc": "^0.28.16",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@graffiti-garden/api": "^1.2.0"
+  }
+}

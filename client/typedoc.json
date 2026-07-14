@@ -1,0 +1,7 @@
+{
+  "entryPoints": ["src/index.ts"],
+  "cname": "guard.graffiti.garden",
+  "titleLink": "/classes/GraffitiGuarded.html",
+  "searchInDocuments": true,
+  "searchInComments": true
+}
