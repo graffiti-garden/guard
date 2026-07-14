@@ -6,8 +6,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@graffiti-garden/api": "^1.2.0",
     "@graffiti-garden/implementation-decentralized": "^0.0.9",
-    "@graffiti-garden/wrapper-vue": "^1.2.2",
+    "penpal": "^7.0.6",
     "vue": "^3.5.29"
   },
   "devDependencies": {
