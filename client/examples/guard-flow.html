@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Graffiti Guard RPC Example</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+    />
+  </head>
+  <body>
+    <main>
+      <h1>Graffiti Guard RPC Example</h1>
+
+      <section>
+        <h2>Session</h2>
+        <p><strong>Actor:</strong> <output id="actor">none</output></p>
+        <button id="login" type="button">Login</button>
+        <button id="logout" type="button">Logout</button>
+      </section>
+
+      <section>
+        <h2>Objects</h2>
+        <button id="post" type="button">Post</button>
+        <button id="get" type="button">Get Last Object</button>
+        <button id="delete" type="button">Delete Last Object</button>
+        <button id="discover" type="button">Discover</button>
+        <button id="continue-discover" type="button">Continue Discover</button>
+      </section>
+
+      <section>
+        <h2>Media</h2>
+        <button id="post-media" type="button">Post Media</button>
+        <button id="get-media" type="button">Get Last Media</button>
+        <button id="delete-media" type="button">Delete Last Media</button>
+      </section>
+
+      <section>
+        <h2>Log</h2>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script type="module">
+      import { GraffitiGuarded } from "../dist/browser/index.js";
+
+      const graffiti = new GraffitiGuarded({
+        hostUrl: "http://localhost:5174/",
+      });
+      const channel = "graffiti-guard-rpc-example";
+
+      let session;
+      let lastObjectUrl;
+      let lastMediaUrl;
+      let cursor;
+
+      const actorOutput = document.querySelector("#actor");
+      const logOutput = document.querySelector("#log");
+
+      graffiti.sessionEvents.addEventListener("login", (event) => {
+        if (!(event instanceof CustomEvent)) return;
+        if (event.detail?.error) {
+          log("login error", event.detail.error);
+          return;
+        }
+        session = event.detail.session;
+        actorOutput.value = session?.actor ?? "none";
+        log("login", event.detail);
+      });
+
+      graffiti.sessionEvents.addEventListener("logout", (event) => {
+        if (!(event instanceof CustomEvent)) return;
+        if (event.detail?.error) {
+          log("logout error", event.detail.error);
+          return;
+        }
+        if (event.detail?.actor === session?.actor) {
+          session = undefined;
+          actorOutput.value = "none";
+        }
+        log("logout", event.detail);
+      });
+
+      graffiti.sessionEvents.addEventListener("initialized", (event) => {
+        log(
+          "session events initialized",
+          event instanceof CustomEvent ? event.detail : undefined,
+        );
+      });
+
+      document.querySelector("#login").addEventListener("click", () => {
+        run("login", () => graffiti.login());
+      });
+
+      document.querySelector("#logout").addEventListener("click", () => {
+        run("logout", async () => {
+          await graffiti.logout(requireSession());
+        });
+      });
+
+      document.querySelector("#post").addEventListener("click", () => {
+        run("post", async () => {
+          const object = await graffiti.post(
+            {
+              value: {
+                type: "Note",
+                content: `Hello at ${new Date().toLocaleTimeString()}`,
+              },
+              channels: [channel],
+            },
+            requireSession(),
+          );
+          lastObjectUrl = object.url;
+          return object;
+        });
+      });
+
+      document.querySelector("#get").addEventListener("click", () => {
+        run("get", () => graffiti.get(requireObjectUrl(), {}, requireSession()));
+      });
+
+      document.querySelector("#delete").addEventListener("click", () => {
+        run("delete", async () => {
+          const deleted = await graffiti.delete(
+            requireObjectUrl(),
+            requireSession(),
+          );
+          lastObjectUrl = undefined;
+          return deleted;
+        });
+      });
+
+      document.querySelector("#discover").addEventListener("click", () => {
+        run("discover", async () => {
+          return consumeStream(
+            graffiti.discover(
+              [channel],
+              {
+                properties: {
+                  value: {
+                    properties: {
+                      type: { const: "Note" },
+                      content: { type: "string" },
+                    },
+                    required: ["type", "content"],
+                  },
+                },
+              },
+              requireSession(),
+            ),
+          );
+        });
+      });
+
+      document
+        .querySelector("#continue-discover")
+        .addEventListener("click", () => {
+          run("continueDiscover", () => {
+            if (!cursor) throw new Error("Run discover first.");
+            return consumeStream(
+              graffiti.continueDiscover(cursor, requireSession()),
+            );
+          });
+        });
+
+      document.querySelector("#post-media").addEventListener("click", () => {
+        run("postMedia", async () => {
+          lastMediaUrl = await graffiti.postMedia(
+            {
+              data: new Blob(["hello from the RPC example"], {
+                type: "text/plain",
+              }),
+            },
+            requireSession(),
+          );
+          return lastMediaUrl;
+        });
+      });
+
+      document.querySelector("#get-media").addEventListener("click", () => {
+        run("getMedia", async () => {
+          const media = await graffiti.getMedia(
+            requireMediaUrl(),
+            { types: ["text/plain"] },
+            requireSession(),
+          );
+          return {
+            actor: media.actor,
+            type: media.data.type,
+            size: media.data.size,
+            text: await media.data.text(),
+          };
+        });
+      });
+
+      document.querySelector("#delete-media").addEventListener("click", () => {
+        run("deleteMedia", async () => {
+          await graffiti.deleteMedia(requireMediaUrl(), requireSession());
+          lastMediaUrl = undefined;
+        });
+      });
+
+      async function consumeStream(stream) {
+        const objects = [];
+        let next = await stream.next();
+
+        while (!next.done) {
+          if (next.value.error) {
+            log("stream error", next.value.error);
+          } else if (next.value.tombstone) {
+            log("stream tombstone", next.value.object);
+          } else {
+            objects.push(next.value.object);
+            lastObjectUrl = next.value.object.url;
+          }
+          next = await stream.next();
+        }
+
+        cursor = next.value.cursor;
+        return { objects, cursor };
+      }
+
+      async function run(label, action) {
+        try {
+          log(`start ${label}`);
+          log(`done ${label}`, await action());
+        } catch (error) {
+          log(`error ${label}`, error);
+        }
+      }
+
+      function requireSession() {
+        if (!session) throw new Error("Log in first.");
+        return session;
+      }
+
+      function requireObjectUrl() {
+        if (!lastObjectUrl) {
+          throw new Error("Post or discover an object first.");
+        }
+        return lastObjectUrl;
+      }
+
+      function requireMediaUrl() {
+        if (!lastMediaUrl) throw new Error("Post media first.");
+        return lastMediaUrl;
+      }
+
+      function log(label, value) {
+        const message =
+          value === undefined
+            ? label
+            : `${label}\n${JSON.stringify(value, replacer, 2)}`;
+        logOutput.textContent = `${message}\n\n${logOutput.textContent}`;
+      }
+
+      function replacer(_key, value) {
+        if (value instanceof Error) return value.message;
+        return value;
+      }
+    </script>
+  </body>
+</html>

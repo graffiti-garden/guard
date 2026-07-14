@@ -28,6 +28,7 @@
   "author": "Theia Henderson",
   "license": "GPL-3.0-or-later",
   "scripts": {
+    "dev": "npm run build:js && concurrently -k -n host,client \"npm --prefix ../host run dev -- --host 0.0.0.0 --port 5174\" \"http-server . -a 0.0.0.0 -p 5173 -c-1\"",
     "build:types": "tsc --declaration --emitDeclarationOnly",
     "build:js": "tsx esbuild.config.mts",
     "build": "rm -rf dist && rm -rf docs && npm run build:types && npm run build:js && npm run build:docs",
@@ -42,12 +43,15 @@
     "url": "https://github.com/graffiti-garden/guard/issues"
   },
   "devDependencies": {
+    "concurrently": "^10.0.3",
     "esbuild": "^0.28.1",
+    "http-server": "^14.1.1",
     "tsx": "^4.21.0",
     "typedoc": "^0.28.16",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@graffiti-garden/api": "^1.2.0"
+    "@graffiti-garden/api": "^1.2.0",
+    "penpal": "^7.0.6"
   }
 }
