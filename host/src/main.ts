@@ -13,6 +13,12 @@ import { connect, Reply, WindowMessenger } from "penpal";
 import { createApp } from "vue";
 import Home from "./Home.vue";
 import { handleLoginRedirect, isLoginRedirect } from "./login_redirect";
+import {
+  guardGraffitiCall,
+  setGuardFrameVisible,
+  type GraffitiArgs,
+  type GraffitiMethod,
+} from "./guard";
 import { showComponent } from "./show_component";
 import { activateStorageAccess } from "./storage_access";
 import Status from "./templates/Status.vue";
@@ -39,7 +45,7 @@ const simpleMethods = [
   "logout",
   "actorToHandle",
   "handleToActor",
-] as const;
+] as const satisfies readonly GraffitiMethod[];
 const sessionEventTypes = ["login", "logout", "initialized"] as const;
 
 const pageUrl = new URL(window.location.href);
@@ -54,6 +60,7 @@ let remoteReady: Promise<ClientMethods> | undefined;
 let rpcConnection: { destroy(): void } | undefined;
 
 createApp(Home).mount("#app");
+setGuardFrameVisible(setFrameVisible);
 
 if (remoteWindow !== undefined) {
   startRpcHost();
@@ -88,9 +95,12 @@ function startRpcHost() {
   const rpcSimpleMethods = Object.fromEntries(
     simpleMethods.map((method) => [
       method,
-      async (...args: unknown[]) => {
+      async (...args: GraffitiArgs<typeof method>) => {
         const graffiti = await getGraffiti();
-        const fn = graffiti[method] as (...methodArgs: unknown[]) => unknown;
+        await guardGraffitiCall(graffiti, method, args);
+        const fn = graffiti[method] as (
+          ...methodArgs: GraffitiArgs<typeof method>
+        ) => unknown;
         return fn.apply(graffiti, args);
       },
     ]),
@@ -107,10 +117,16 @@ function startRpcHost() {
       async postMedia(media: SerializedPostMedia, session: GraffitiSession) {
         const graffiti = await getGraffiti();
         const data = new Blob([media.data.buffer], { type: media.data.type });
-        return graffiti.postMedia({ ...media, data }, session);
+        const args: Parameters<Graffiti["postMedia"]> = [
+          { ...media, data },
+          session,
+        ];
+        await guardGraffitiCall(graffiti, "postMedia", args);
+        return graffiti.postMedia(...args);
       },
       async getMedia(...args: Parameters<Graffiti["getMedia"]>) {
         const graffiti = await getGraffiti();
+        await guardGraffitiCall(graffiti, "getMedia", args);
         const result = await graffiti.getMedia(...args);
         const buffer = await result.data.arrayBuffer();
         const type = result.data.type;
@@ -125,6 +141,7 @@ function startRpcHost() {
       },
       async discover(id: string, ...args: Parameters<Graffiti["discover"]>) {
         const graffiti = await getGraffiti();
+        await guardGraffitiCall(graffiti, "discover", args);
         streams.set(id, graffiti.discover<{}>(...args));
       },
       async continueDiscover(
@@ -132,6 +149,7 @@ function startRpcHost() {
         ...args: Parameters<Graffiti["continueDiscover"]>
       ) {
         const graffiti = await getGraffiti();
+        await guardGraffitiCall(graffiti, "continueDiscover", args);
         streams.set(id, graffiti.continueDiscover<{}>(...args));
       },
       streamNext(id: string) {
