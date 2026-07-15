@@ -12,6 +12,8 @@ import { GraffitiDecentralized } from "@graffiti-garden/implementation-decentral
 import { connect, Reply, WindowMessenger } from "penpal";
 import { createApp } from "vue";
 import Home from "./Home.vue";
+import { handleLoginRedirect, isLoginRedirect } from "./login_redirect";
+import { activateStorageAccess } from "./storage_access";
 
 type ClientMethods = {
   sessionEvent(type: string, detail: unknown): Promise<void>;
@@ -37,110 +39,143 @@ const simpleMethods = [
 ] as const;
 const sessionEventTypes = ["login", "logout", "initialized"] as const;
 
-const graffiti = new GraffitiDecentralized();
+const pageUrl = new URL(window.location.href);
+const remoteWindow = window.parent !== window ? window.parent : undefined;
+
 const loggedInActors = new Set<string>();
 const streams = new Map<string, GraffitiObjectStream<{}>>();
-let remote: ClientMethods | undefined;
 let destroyed = false;
+let graffiti: GraffitiDecentralized | undefined;
+let remote: ClientMethods | undefined;
+let rpcConnection: { destroy(): void } | undefined;
 
-graffiti.sessionEvents.addEventListener("login", (event) => {
+createApp(Home).mount("#app");
+
+if (remoteWindow !== undefined) {
+  startRpcHost();
+} else if (isLoginRedirect(pageUrl)) {
+  void handleLoginRedirect({ pageUrl, graffiti: startGraffiti(), renderStatus });
+} else {
+  renderStatus("Open this page from an app using Graffiti Guard.");
+}
+
+function startGraffiti() {
+  if (graffiti !== undefined) return graffiti;
+
+  graffiti = new GraffitiDecentralized();
+  graffiti.sessionEvents.addEventListener("login", onLogin);
+  graffiti.sessionEvents.addEventListener("logout", onLogout);
+  for (const type of sessionEventTypes) {
+    graffiti.sessionEvents.addEventListener(type, forward);
+  }
+  return graffiti;
+}
+
+async function getGraffiti() {
+  if (graffiti !== undefined) return graffiti;
+  if (remoteWindow !== undefined) await activateStorageAccess();
+  return startGraffiti();
+}
+
+function startRpcHost() {
+  if (remoteWindow === undefined) return;
+  const rpcSimpleMethods = Object.fromEntries(
+    simpleMethods.map((method) => [
+      method,
+      async (...args: unknown[]) => {
+        const graffiti = await getGraffiti();
+        const fn = graffiti[method] as (...methodArgs: unknown[]) => unknown;
+        return fn.apply(graffiti, args);
+      },
+    ]),
+  );
+
+  rpcConnection?.destroy();
+  const connection = connect<ClientMethods>({
+    messenger: new WindowMessenger({
+      remoteWindow,
+      allowedOrigins: ["*"],
+    }),
+    methods: {
+      ...rpcSimpleMethods,
+      async postMedia(media: SerializedPostMedia, session: GraffitiSession) {
+        const graffiti = await getGraffiti();
+        const data = new Blob([media.data.buffer], { type: media.data.type });
+        return graffiti.postMedia({ ...media, data }, session);
+      },
+      async getMedia(...args: Parameters<Graffiti["getMedia"]>) {
+        const graffiti = await getGraffiti();
+        const result = await graffiti.getMedia(...args);
+        const buffer = await result.data.arrayBuffer();
+        const type = result.data.type;
+
+        return new Reply(
+          {
+            ...result,
+            data: { buffer, type },
+          } satisfies SerializedMedia,
+          { transferables: [buffer] },
+        );
+      },
+      async discover(id: string, ...args: Parameters<Graffiti["discover"]>) {
+        const graffiti = await getGraffiti();
+        streams.set(id, graffiti.discover<{}>(...args));
+      },
+      async continueDiscover(
+        id: string,
+        ...args: Parameters<Graffiti["continueDiscover"]>
+      ) {
+        const graffiti = await getGraffiti();
+        streams.set(id, graffiti.continueDiscover<{}>(...args));
+      },
+      streamNext(id: string) {
+        return streams.get(id)?.next();
+      },
+      async streamReturn(id: string) {
+        await streams.get(id)?.return({ cursor: "" });
+        streams.delete(id);
+      },
+      async destroy() {
+        await destroy();
+      },
+      async initialize() {
+        const replayExistingSessions = graffiti !== undefined;
+        await getGraffiti();
+        if (!replayExistingSessions) return;
+        replaySessions();
+      },
+    },
+  });
+  rpcConnection = connection;
+
+  connection.promise.then((client) => {
+    remote = client;
+    renderStatus("Graffiti Guard iframe connected.");
+  }).catch(() => {});
+}
+
+function onLogin(event: Event) {
   if (!(event instanceof CustomEvent)) return;
-  const detail: GraffitiLoginEvent["detail"] = event.detail;
+  const detail = event.detail as GraffitiLoginEvent["detail"];
   if (!detail.error) loggedInActors.add(detail.session.actor);
-});
+}
 
-graffiti.sessionEvents.addEventListener("logout", (event) => {
+function onLogout(event: Event) {
   if (!(event instanceof CustomEvent)) return;
   const detail: GraffitiLogoutEvent["detail"] = event.detail;
   if (!detail.error) loggedInActors.delete(detail.actor);
-});
-
-const rpcSimpleMethods = Object.fromEntries(
-  simpleMethods.map((method) => [
-    method,
-    (...args: unknown[]) => {
-      const fn = graffiti[method] as (...methodArgs: unknown[]) => unknown;
-      return fn.apply(graffiti, args);
-    },
-  ]),
-);
-
-const connection = connect<ClientMethods>({
-  messenger: new WindowMessenger({
-    remoteWindow: window.parent,
-    allowedOrigins: ["*"],
-  }),
-  methods: {
-    ...rpcSimpleMethods,
-    postMedia(media: SerializedPostMedia, session: GraffitiSession) {
-      const data = new Blob([media.data.buffer], { type: media.data.type });
-      return graffiti.postMedia({ ...media, data }, session);
-    },
-    async getMedia(...args: Parameters<Graffiti["getMedia"]>) {
-      const result = await graffiti.getMedia(...args);
-      const buffer = await result.data.arrayBuffer();
-      const type = result.data.type;
-
-      return new Reply(
-        {
-          ...result,
-          data: { buffer, type },
-        } satisfies SerializedMedia,
-        { transferables: [buffer] },
-      );
-    },
-    discover(id: string, ...args: Parameters<Graffiti["discover"]>) {
-      streams.set(id, graffiti.discover<{}>(...args))
-    },
-    continueDiscover(
-      id: string,
-      ...args: Parameters<Graffiti["continueDiscover"]>
-    ) {
-      streams.set(id, graffiti.continueDiscover<{}>(...args));
-    },
-    streamNext(id: string) {
-      return streams.get(id)?.next();
-    },
-    async streamReturn(id: string) {
-      await streams.get(id)?.return({ cursor: "" });
-      streams.delete(id);
-    },
-    async destroy() {
-      await destroy();
-    },
-    initialize() {
-      for (const actor of loggedInActors) {
-        const event: GraffitiLoginEvent = new CustomEvent("login", {
-          detail: { session: { actor } },
-        });
-        forward(event);
-      }
-
-      const event: GraffitiSessionInitializedEvent = new CustomEvent(
-        "initialized",
-      );
-      forward(event);
-    },
-  },
-});
-
-connection.promise.then((client) => {
-  remote = client;
-});
-
-for (const type of sessionEventTypes) {
-  graffiti.sessionEvents.addEventListener(type, forward);
 }
-
-createApp(Home).mount("#app");
 
 async function destroy() {
   if (destroyed) return;
   destroyed = true;
+  rpcConnection?.destroy();
 
   for (const type of sessionEventTypes) {
-    graffiti.sessionEvents.removeEventListener(type, forward);
+    graffiti?.sessionEvents.removeEventListener(type, forward);
   }
+  graffiti?.sessionEvents.removeEventListener("login", onLogin);
+  graffiti?.sessionEvents.removeEventListener("logout", onLogout);
 
   await Promise.allSettled(
     [...streams.values()].map((stream) => stream.return({ cursor: "" })),
@@ -148,8 +183,31 @@ async function destroy() {
   streams.clear();
 }
 
+function replaySessions() {
+  for (const actor of loggedInActors) {
+    const event: GraffitiLoginEvent = new CustomEvent("login", {
+      detail: { session: { actor } },
+    });
+    forward(event);
+  }
+
+  const event: GraffitiSessionInitializedEvent = new CustomEvent("initialized");
+  forward(event);
+}
+
 function forward(event: Event) {
   if (destroyed) return;
   if (!(event instanceof CustomEvent)) return;
   void remote?.sessionEvent(event.type, event.detail);
+}
+
+function renderStatus(message: string) {
+  const app = document.querySelector("#app");
+  if (app === null) return;
+  app.innerHTML = `
+    <main>
+      <h1>Graffiti Guard</h1>
+      <p>${message}</p>
+    </main>
+  `;
 }

@@ -8,6 +8,7 @@ import {
 import {
   CallOptions,
   connect,
+  type Connection,
   type RemoteProxy,
   WindowMessenger,
 } from "penpal";
@@ -46,7 +47,6 @@ const simpleMethods = [
   "get",
   "delete",
   "deleteMedia",
-  "login",
   "logout",
   "actorToHandle",
   "handleToActor",
@@ -58,27 +58,33 @@ const simpleMethods = [
 // @ts-ignore - simple methods are attached programmatically in the constructor.
 export class GraffitiGuarded extends Graffiti {
   readonly sessionEvents = new EventTarget();
-  private readonly connection: { destroy(): void };
+  private readonly hostUrl: URL;
+  private readonly iframe: HTMLIFrameElement;
+  private readonly connection: Connection<RPCMethods>;
   private readonly remote_: Promise<RemoteProxy<RPCMethods>>;
+  private destroyed = false;
 
   constructor(options: { hostUrl: string | URL }) {
     super();
-
     const hostUrl = new URL(options.hostUrl.toString(), document.baseURI);
+    this.hostUrl = hostUrl;
+
     const iframe = document.createElement("iframe");
-    iframe.src = hostUrl.href;
     iframe.title = "Graffiti Guard";
     iframe.style.display = "none";
+    iframe.src = hostUrl.href;
     document.body.append(iframe);
+    this.iframe = iframe;
 
-    if (iframe.contentWindow == null) {
-      throw new Error("Could not create Graffiti guard iframe.");
+    const remoteWindow = iframe.contentWindow;
+    if (remoteWindow === null) {
+      throw new Error("Graffiti Guard iframe did not create a content window.");
     }
 
-    const connection = connect<RPCMethods>({
+    this.connection = connect<RPCMethods>({
       messenger: new WindowMessenger({
-        remoteWindow: iframe.contentWindow,
-        allowedOrigins: [hostUrl.origin],
+        remoteWindow,
+        allowedOrigins: [this.hostUrl.origin],
       }),
       methods: {
         sessionEvent: (type: string, detail: unknown) => {
@@ -86,14 +92,12 @@ export class GraffitiGuarded extends Graffiti {
         },
       },
     });
-
-    this.connection = {
-      destroy() {
-        connection.destroy();
-        iframe.remove();
-      },
-    };
-    this.remote_ = connection.promise;
+    this.remote_ = this.connection.promise.then((remote) => {
+      void remote.initialize().catch(() => {
+        // The host may navigate during login flows.
+      });
+      return remote;
+    });
 
     for (const method of simpleMethods) {
       (this as any)[method] = async (...args: unknown[]) => {
@@ -106,11 +110,24 @@ export class GraffitiGuarded extends Graffiti {
     setTimeout(async () => (await this.remote()).initialize(), 0);
   }
 
+  login: Graffiti["login"] = (actor?: string | null) => {
+    const loginUrl = new URL(this.hostUrl.href);
+    loginUrl.searchParams.set("guardLogin", "1");
+    loginUrl.searchParams.set("redirectUrl", window.location.href);
+    if (actor) loginUrl.searchParams.set("suggestedActor", actor);
+    window.location.assign(loginUrl);
+    return Promise.resolve();
+  };
+
   destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+
     void this.remote()
       .then((remote) => remote.destroy())
       .catch(() => {});
     this.connection.destroy();
+    this.iframe.remove();
   }
 
   private remote() {
