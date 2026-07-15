@@ -12,6 +12,7 @@ import {
   type RemoteProxy,
   WindowMessenger,
 } from "penpal";
+export type * from "@graffiti-garden/api";
 
 type MethodsOf<T> = {
   [K in keyof T as T[K] extends (...args: any[]) => any ? K : never]: T[K];
