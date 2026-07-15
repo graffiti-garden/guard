@@ -33,20 +33,30 @@ export async function activateStorageAccess(
       storageDocument.requestStorageAccess?.bind(document);
     if (requestStorageAccess === undefined) return;
 
-    if (!hasStorageAccess) {
-      await requestStorageAccessWithPrompt(setFrameVisible, requestStorageAccess);
+    try {
+      await requestAndInstallStorageAccess(requestStorageAccess);
       return;
+    } catch (error) {
+      if (hasStorageAccess) return;
     }
 
-    try {
-      installStorageHandle(await requestStorageAccess(storageTypes));
-    } catch (error) {
-      if (error instanceof TypeError && !hasStorageAccess) {
-        await requestStorageAccess().catch(() => {});
-      }
-    }
+    await requestStorageAccessWithPrompt(setFrameVisible, requestStorageAccess);
   })();
   return storageAccess;
+}
+
+async function requestAndInstallStorageAccess(
+  requestStorageAccess: RequestStorageAccess,
+) {
+  try {
+    installStorageHandle(await requestStorageAccess(storageTypes));
+  } catch (error) {
+    if (error instanceof TypeError) {
+      await requestStorageAccess();
+      return;
+    }
+    throw error;
+  }
 }
 
 async function requestStorageAccessWithPrompt(
@@ -62,15 +72,7 @@ async function requestStorageAccessWithPrompt(
     );
     button?.addEventListener("click", async () => {
       try {
-        try {
-          installStorageHandle(await requestStorageAccess(storageTypes));
-        } catch (error) {
-          if (error instanceof TypeError) {
-            await requestStorageAccess();
-          } else {
-            throw error;
-          }
-        }
+        await requestAndInstallStorageAccess(requestStorageAccess);
         await setFrameVisible(false);
         resolve();
       } catch (error) {
