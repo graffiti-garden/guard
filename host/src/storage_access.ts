@@ -8,6 +8,7 @@ type DocumentWithStorageAccess = Document & {
   requestStorageAccess?: {
     (): Promise<void>;
     (types: {
+      cookies: true;
       indexedDB: true;
       localStorage: true;
     }): Promise<StorageAccessHandleSubset>;
@@ -17,7 +18,11 @@ type RequestStorageAccess = NonNullable<
   DocumentWithStorageAccess["requestStorageAccess"]
 >;
 
-const storageTypes = { indexedDB: true, localStorage: true } as const;
+const storageTypes = {
+  cookies: true,
+  indexedDB: true,
+  localStorage: true,
+} as const;
 
 let storageAccess: Promise<void> | undefined;
 
@@ -26,36 +31,40 @@ export async function activateStorageAccess(
 ) {
   storageAccess ??= (async () => {
     const storageDocument = document as DocumentWithStorageAccess;
-    const hasStorageAccess =
-      (await storageDocument.hasStorageAccess?.()) === true;
-
     const requestStorageAccess =
       storageDocument.requestStorageAccess?.bind(document);
     if (requestStorageAccess === undefined) return;
 
-    try {
-      await requestAndInstallStorageAccess(requestStorageAccess);
-      return;
-    } catch (error) {
-      if (hasStorageAccess) return;
-    }
+    if (await tryActivateStorageAccess(requestStorageAccess)) return;
 
     await requestStorageAccessWithPrompt(setFrameVisible, requestStorageAccess);
   })();
   return storageAccess;
 }
 
-async function requestAndInstallStorageAccess(
+async function tryActivateStorageAccess(
   requestStorageAccess: RequestStorageAccess,
 ) {
   try {
+    await requestAndInstallStorageAccess(requestStorageAccess);
+    return true;
+  } catch {
+    const hasStorageAccess = await (
+      document as DocumentWithStorageAccess
+    ).hasStorageAccess?.();
+    return hasStorageAccess === true;
+  }
+}
+
+async function requestAndInstallStorageAccess(
+  requestStorageAccess: RequestStorageAccess,
+) {
+  // Durable sessions are cookie-backed. These handles are nice-to-have cache
+  // access when a browser supports typed Storage Access requests.
+  try {
     installStorageHandle(await requestStorageAccess(storageTypes));
-  } catch (error) {
-    if (error instanceof TypeError) {
-      await requestStorageAccess();
-      return;
-    }
-    throw error;
+  } catch {
+    await requestStorageAccess();
   }
 }
 
