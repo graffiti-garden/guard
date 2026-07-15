@@ -1,3 +1,6 @@
+import { showComponent } from "./show_component";
+import StorageAccess from "./templates/StorageAccess.vue";
+
 type StorageAccessHandleSubset = {
   indexedDB?: IDBFactory;
   localStorage?: Storage;
@@ -75,20 +78,19 @@ async function requestStorageAccessWithPrompt(
   await setFrameVisible(true);
 
   return new Promise<void>((resolve, reject) => {
-    renderStorageAccessPrompt();
-    const button = document.querySelector<HTMLButtonElement>(
-      "#graffiti-guard-storage-access",
-    );
-    button?.addEventListener("click", async () => {
+    const onContinue = async () => {
+      showComponent(StorageAccess, { busy: true, onContinue });
       try {
         await requestAndInstallStorageAccess(requestStorageAccess);
         await setFrameVisible(false);
         resolve();
       } catch (error) {
-        renderStorageAccessError();
+        showComponent(StorageAccess, { error: true });
         reject(error);
       }
-    });
+    };
+
+    showComponent(StorageAccess, { onContinue });
   });
 }
 
@@ -105,27 +107,4 @@ function installStorageHandle(handle: StorageAccessHandleSubset | undefined) {
       value: handle.indexedDB,
     });
   }
-}
-
-function renderStorageAccessPrompt() {
-  const app = document.querySelector("#app");
-  if (app === null) return;
-  app.innerHTML = `
-    <main>
-      <h1>Graffiti Guard</h1>
-      <p>This app needs access to your Graffiti session.</p>
-      <button id="graffiti-guard-storage-access">Continue</button>
-    </main>
-  `;
-}
-
-function renderStorageAccessError() {
-  const app = document.querySelector("#app");
-  if (app === null) return;
-  app.innerHTML = `
-    <main>
-      <h1>Graffiti Guard</h1>
-      <p>Storage access was not granted. Reload the app to try again.</p>
-    </main>
-  `;
 }

@@ -13,7 +13,9 @@ import { connect, Reply, WindowMessenger } from "penpal";
 import { createApp } from "vue";
 import Home from "./Home.vue";
 import { handleLoginRedirect, isLoginRedirect } from "./login_redirect";
+import { showComponent } from "./show_component";
 import { activateStorageAccess } from "./storage_access";
+import Status from "./templates/Status.vue";
 
 type ClientMethods = {
   sessionEvent(type: string, detail: unknown): Promise<void>;
@@ -56,9 +58,11 @@ createApp(Home).mount("#app");
 if (remoteWindow !== undefined) {
   startRpcHost();
 } else if (isLoginRedirect(pageUrl)) {
-  void handleLoginRedirect({ pageUrl, graffiti: startGraffiti(), renderStatus });
+  void handleLoginRedirect({ pageUrl, graffiti: startGraffiti() });
 } else {
-  renderStatus("Open this page from an app using Graffiti Guard.");
+  showComponent(Status, {
+    message: "Open this page from an app using Graffiti Guard.",
+  });
 }
 
 function startGraffiti() {
@@ -152,7 +156,7 @@ function startRpcHost() {
 
   remoteReady = connection.promise.then((client) => {
     remote = client;
-    renderStatus("Graffiti Guard iframe connected.");
+    showComponent(Status, { message: "Graffiti Guard iframe connected." });
     return client;
   });
   remoteReady.catch(() => {});
@@ -208,15 +212,4 @@ function forward(event: Event) {
   if (destroyed) return;
   if (!(event instanceof CustomEvent)) return;
   void remote?.sessionEvent(event.type, event.detail);
-}
-
-function renderStatus(message: string) {
-  const app = document.querySelector("#app");
-  if (app === null) return;
-  app.innerHTML = `
-    <main>
-      <h1>Graffiti Guard</h1>
-      <p>${message}</p>
-    </main>
-  `;
 }

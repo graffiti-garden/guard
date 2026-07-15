@@ -1,9 +1,10 @@
 import type { Graffiti, GraffitiLoginEvent } from "@graffiti-garden/api";
+import { showComponent } from "./show_component";
+import Status from "./templates/Status.vue";
 
 type HandleLoginOptions = {
   pageUrl: URL;
   graffiti: Graffiti;
-  renderStatus(message: string): void;
 };
 
 const redirectUrlStorageKey = "graffiti-guard-redirect-url";
@@ -16,11 +17,10 @@ export function isLoginRedirect(pageUrl: URL) {
 export async function handleLoginRedirect({
   pageUrl,
   graffiti,
-  renderStatus,
 }: HandleLoginOptions) {
   const redirectUrl = getRedirectUrl(pageUrl);
   if (redirectUrl === null) {
-    renderStatus("Missing redirect URL.");
+    showComponent(Status, { message: "Missing redirect URL." });
     return;
   }
 
@@ -35,7 +35,9 @@ export async function handleLoginRedirect({
     window.location.assign(redirectUrl);
   };
 
-  renderStatus(completingLogin ? "Completing login..." : "Opening login...");
+  showComponent(Status, {
+    message: completingLogin ? "Completing login..." : "Opening login...",
+  });
   graffiti.sessionEvents.addEventListener("login", (event) => {
     if (!(event instanceof CustomEvent)) return;
     const detail = event.detail as GraffitiLoginEvent["detail"];
