@@ -13,12 +13,17 @@ type DocumentWithStorageAccess = Document & {
     }): Promise<StorageAccessHandleSubset>;
   };
 };
+type RequestStorageAccess = NonNullable<
+  DocumentWithStorageAccess["requestStorageAccess"]
+>;
 
 const storageTypes = { indexedDB: true, localStorage: true } as const;
 
 let storageAccess: Promise<void> | undefined;
 
-export async function activateStorageAccess() {
+export async function activateStorageAccess(
+  setFrameVisible: (visible: boolean) => Promise<void> | void = () => {},
+) {
   storageAccess ??= (async () => {
     const storageDocument = document as DocumentWithStorageAccess;
     const hasStorageAccess =
@@ -27,6 +32,11 @@ export async function activateStorageAccess() {
     const requestStorageAccess =
       storageDocument.requestStorageAccess?.bind(document);
     if (requestStorageAccess === undefined) return;
+
+    if (!hasStorageAccess) {
+      await requestStorageAccessWithPrompt(setFrameVisible, requestStorageAccess);
+      return;
+    }
 
     try {
       installStorageHandle(await requestStorageAccess(storageTypes));
@@ -37,6 +47,38 @@ export async function activateStorageAccess() {
     }
   })();
   return storageAccess;
+}
+
+async function requestStorageAccessWithPrompt(
+  setFrameVisible: (visible: boolean) => Promise<void> | void,
+  requestStorageAccess: RequestStorageAccess,
+) {
+  await setFrameVisible(true);
+
+  return new Promise<void>((resolve, reject) => {
+    renderStorageAccessPrompt();
+    const button = document.querySelector<HTMLButtonElement>(
+      "#graffiti-guard-storage-access",
+    );
+    button?.addEventListener("click", async () => {
+      try {
+        try {
+          installStorageHandle(await requestStorageAccess(storageTypes));
+        } catch (error) {
+          if (error instanceof TypeError) {
+            await requestStorageAccess();
+          } else {
+            throw error;
+          }
+        }
+        await setFrameVisible(false);
+        resolve();
+      } catch (error) {
+        renderStorageAccessError();
+        reject(error);
+      }
+    });
+  });
 }
 
 function installStorageHandle(handle: StorageAccessHandleSubset | undefined) {
@@ -52,4 +94,27 @@ function installStorageHandle(handle: StorageAccessHandleSubset | undefined) {
       value: handle.indexedDB,
     });
   }
+}
+
+function renderStorageAccessPrompt() {
+  const app = document.querySelector("#app");
+  if (app === null) return;
+  app.innerHTML = `
+    <main>
+      <h1>Graffiti Guard</h1>
+      <p>This app needs access to your Graffiti session.</p>
+      <button id="graffiti-guard-storage-access">Continue</button>
+    </main>
+  `;
+}
+
+function renderStorageAccessError() {
+  const app = document.querySelector("#app");
+  if (app === null) return;
+  app.innerHTML = `
+    <main>
+      <h1>Graffiti Guard</h1>
+      <p>Storage access was not granted. Reload the app to try again.</p>
+    </main>
+  `;
 }

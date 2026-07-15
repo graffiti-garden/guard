@@ -72,6 +72,7 @@ export class GraffitiGuarded extends Graffiti {
 
     const iframe = document.createElement("iframe");
     iframe.title = "Graffiti Guard";
+    iframe.allow = "storage-access";
     iframe.style.display = "none";
     iframe.src = hostUrl.href;
     document.body.append(iframe);
@@ -91,6 +92,9 @@ export class GraffitiGuarded extends Graffiti {
         sessionEvent: (type: string, detail: unknown) => {
           this.sessionEvents.dispatchEvent(new CustomEvent(type, { detail }));
         },
+        setFrameVisible: (visible: boolean) => {
+          this.setFrameVisible(visible);
+        },
       },
     });
     this.remote_ = this.connection.promise.then((remote) => {
@@ -107,8 +111,6 @@ export class GraffitiGuarded extends Graffiti {
         return fn(...clone(args));
       };
     }
-
-    setTimeout(async () => (await this.remote()).initialize(), 0);
   }
 
   login: Graffiti["login"] = (actor?: string | null) => {
@@ -133,6 +135,19 @@ export class GraffitiGuarded extends Graffiti {
 
   private remote() {
     return this.remote_;
+  }
+
+  private setFrameVisible(visible: boolean) {
+    Object.assign(this.iframe.style, {
+      background: "white",
+      border: "0",
+      display: visible ? "block" : "none",
+      height: "100vh",
+      inset: "0",
+      position: "fixed",
+      width: "100vw",
+      zIndex: "2147483647",
+    });
   }
 
   getMedia: Graffiti["getMedia"] = async (...args) => {

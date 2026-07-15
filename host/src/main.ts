@@ -17,6 +17,7 @@ import { activateStorageAccess } from "./storage_access";
 
 type ClientMethods = {
   sessionEvent(type: string, detail: unknown): Promise<void>;
+  setFrameVisible(visible: boolean): Promise<void>;
 };
 
 type SerializedMedia = Omit<GraffitiMedia, "data"> & {
@@ -47,6 +48,7 @@ const streams = new Map<string, GraffitiObjectStream<{}>>();
 let destroyed = false;
 let graffiti: GraffitiDecentralized | undefined;
 let remote: ClientMethods | undefined;
+let remoteReady: Promise<ClientMethods> | undefined;
 let rpcConnection: { destroy(): void } | undefined;
 
 createApp(Home).mount("#app");
@@ -73,7 +75,7 @@ function startGraffiti() {
 
 async function getGraffiti() {
   if (graffiti !== undefined) return graffiti;
-  if (remoteWindow !== undefined) await activateStorageAccess();
+  if (remoteWindow !== undefined) await activateStorageAccess(setFrameVisible);
   return startGraffiti();
 }
 
@@ -148,10 +150,17 @@ function startRpcHost() {
   });
   rpcConnection = connection;
 
-  connection.promise.then((client) => {
+  remoteReady = connection.promise.then((client) => {
     remote = client;
     renderStatus("Graffiti Guard iframe connected.");
-  }).catch(() => {});
+    return client;
+  });
+  remoteReady.catch(() => {});
+}
+
+async function setFrameVisible(visible: boolean) {
+  const client = remote ?? (await remoteReady);
+  await client?.setFrameVisible(visible);
 }
 
 function onLogin(event: Event) {
